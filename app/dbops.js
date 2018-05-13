@@ -5,7 +5,11 @@ var request = require('request');                         // send HTTP requests
 var GoogleAuth = require('google-auth-library');		  // authenticate google user tokens to sign users in with a google Account
 var auth = new GoogleAuth;
 var client = new auth.OAuth2("285224215537-l5a1ol101rmutrvbcd2omt5r3rktmh6v.apps.googleusercontent.com", '', '');
-var sanitizeHtml = require('sanitize-html');			// sanitize HTML
+var sanitizeHtml = require('sanitize-html');			  // sanitize HTML
+var showdown  = require('showdown');					  // convert Markdown to HTML
+  
+
+
 
 var transporter = nodemailer.createTransport({
     host: 'smtp.zoho.com',
@@ -16,6 +20,35 @@ var transporter = nodemailer.createTransport({
         pass: process.env.ZOHO_PASSWORD 
     }
 });
+
+showdown.extension('myext', function () {
+  var store = '';
+  var lngExt = function (text, converter, options) {
+    var globals = {converter: converter};
+    options.strikethrough = true;
+    text = showdown.subParser('italicsAndBold')(text, options, globals);
+    text = showdown.subParser('strikethrough')(text, options, globals);
+    text = showdown.subParser('codeSpans')(text, options, globals);
+    text = text.trim();
+    store = text;
+    return "";
+  };
+  var otpExt = function (text, converter, options) {
+    return store;
+  };
+  return [
+    {
+      type: 'lang',
+      filter: lngExt
+    },
+    {
+      type: 'output',
+      filter: otpExt
+    }
+  ];
+});
+
+var converter = new showdown.Converter();
 
 
 
@@ -462,8 +495,17 @@ function addDefinition(db, req, callback){
 								if(sanitizedTerm.trim().length && validateInput(term)){
 									relatedTerms.push(sanitizedTerm.toLowerCase())
 								}
-							})
+							});
 						}
+
+						var sanitizedBody = sanitizeInput(req.body.definition);
+
+						var preMarkUpBody = sanitizedBody.replace(/^\#/mg, "").replace(/\`{2,}/g, "\`").replace(/\~\~/g, "").replace(/<a href="/g, "");
+						var markedUpBody = converter.makeHtml(preMarkUpBody);
+
+						console.log("markedUpBody");
+						console.log(markedUpBody);
+
 
 						console.log("This user has submitted " + approvedDefinitions.length + " definitions");
 
@@ -479,7 +521,8 @@ function addDefinition(db, req, callback){
 							rejected: false,
 							lastEdit: new Date(),
 							created: new Date(),
-							body: sanitizeInput(req.body.definition),
+							body: sanitizedBody,
+							markdown: markedUpBody,
 							category: req.body.category,
 							related: relatedTerms
 						}
@@ -606,6 +649,7 @@ function addDefinition(db, req, callback){
 										$set: {
 											lastEdit: new Date(),
 											body: req.body.definition,
+											markdown: markedUpBody,
 											category: req.body.category,
 											related: relatedTerms
 										}
@@ -715,7 +759,7 @@ function addComment(db, req, callback){
 
 						database.read(db, "definitions", definitionQuery, function fetchDefinition(definitions){
 							if(definitions.length == 1){
-								newCommentQuery = {
+								var newCommentQuery = {
 									id: Math.floor(Date.now()/Math.random()),							// hopefully this should give us a random ID
 									term: definitions[0].term,
 									post_id: parseInt(req.body.post_id),
@@ -730,7 +774,15 @@ function addComment(db, req, callback){
 									body: sanitizedComment
 								}
 
+
+
 								database.create(db, "comments", newCommentQuery, function createComment(newComment){
+									var thisMessage = "Someone has commented on your definition: " + definitions[0].term;
+									
+									createNotification(db, req, definitions[0].author, thisMessage, definitions[0].term, "approved", "new-comment", function addNotification(){
+										console.log("Notification created");	
+									})
+
 									callback({
 										status: "success",
 										comment: newComment.ops[0]
@@ -941,7 +993,7 @@ function createNewVote(db, req, newVote, callback){
 
 	database.create(db, "votes", newVote, function createVote(newVote){
 
-		var voteChange
+		var voteChange;
 
 		if(newVote.ops[0].direction == "up"){
 			voteChange = "upvotes";
@@ -1014,12 +1066,19 @@ function adminVote(db, req, callback){
 			}
 		}
 
-		var userQuery = {
-			username: req.body.author
-		}
+		
 
-		database.update(db, "definitions", definitionQuery, definitionUpdateQuery, function updateDefinition(response){
+		database.update(db, "definitions", definitionQuery, definitionUpdateQuery, function updateDefinition(updatedDefinition){
 			database.create(db, "notifications", newNotification, function createNotification(newNotification){
+				
+				console.log("updatedDefinition");
+				console.log(updatedDefinition);
+
+				var userQuery = {
+					username: updatedDefinition.author
+				}
+
+
 				database.update(db, "users", userQuery, newNotificationsUpdate, function addNewNotification(newNotification){
 					callback({status: "success", message: "definition updated"});
 				});
@@ -1063,7 +1122,7 @@ function adminVote(db, req, callback){
 						var thisType = updatedReport.type.substr(0, (updatedReport.type.length-1))
 
 						var newNotification = {
-							to: updatedReport.author,
+							to: updatedPost.author,
 							from: "admin",
 							date: new Date(),
 							body: "Your comment has been removed",
@@ -1254,24 +1313,32 @@ function signup(db, req, callback){
 
 					if(commonPasswords.indexOf(req.body.password.trim()) == -1){
 						
-						var userQuery = {
-							username: req.body.username.trim().toLowerCase(),
-						}
+						// check if either this email or username exists
+
+						var userEmailQuery = { email: req.body.email.trim().toLowerCase() }
+						var userUsernameQuery = { username: req.body.username.trim().toLowerCase() }
 
 						if(validateCharset(req.body.username)){
-							database.read(db, "users", userQuery, function(existingUsers){
-								if(existingUsers.length == 0){	
+							database.read(db, "users", userEmailQuery, function(existingEmailUsers){
+								if(existingEmailUsers.length == 0){	
+									database.read(db, "users", userUsernameQuery, function(existingUsernameUsers){
+										
+										if(existingUsernameUsers.length == 0){	
+											bcrypt.genSalt(10, function(err, salt) {
+											    bcrypt.hash(req.body.password, salt, function(err, hash){
+											    	createNewUser(hash, null, null, req.body.email.trim().toLowerCase(), db, req, function(newUser){
+														callback({status: "success", message: "Account created. Go ahead and log in!", user: newUser});
+														// login(db, req, callback)
+													})  
+											    });
+											});
 
-									bcrypt.genSalt(10, function(err, salt) {
-									    bcrypt.hash(req.body.password, salt, function(err, hash){
-									    	createNewUser(hash, null, null, req.body.email.trim().toLowerCase(), db, req, function(newUser){
-												callback({status: "success", message: "Account created. Go ahead and log in!", user: newUser});
-											})  
-									    });
+										} else {	
+											callback({status: "fail", message: "That username is not available", errorType: "username"})
+										}	
 									});
-
 								} else {	
-									callback({status: "fail", message: "That username is not available", errorType: "username"})
+									callback({status: "fail", message: "That email is not available", errorType: "email"})
 								}
 							})
 						} else {
@@ -1414,6 +1481,8 @@ function githubLogin(db, req, thisCode, callback){
 	request.get({url: u, json: true}, function (error, apiRes, body){
 		
 		console.log("got a response");
+		console.log("body");
+		console.log(body);
 		var access_token = body.access_token;
 
 		if (error) {
@@ -1433,80 +1502,94 @@ function githubLogin(db, req, thisCode, callback){
 
 	    	// get token from github and request user profile info
 
-	    	request.get({url: profileUrl, headers: profileHeaders, json: true}, function (error, apiRes, userBody){
-	    		if (error) {
-					console.log("error");
-			        console.log(error)
-			        callback({status: "fail", message: "Github error", errorType: "username"})
-			    } else {
-		    		console.log("here's the user:");
-		    		console.log(userBody);
-		    		// callback({status: "success", message: "Account created. Go ahead and log in!"});
+	    	if(typeof(access_token) != "undefined"){
 
-		    		/* from here on, we try to log the user in */
 
-		    		if(typeof(userBody.id) != "undefined" && userBody.message != 'Bad credentials'){ 
 
-				    	request.get({url: emailUrl, headers: profileHeaders, json: true}, function (error, apiRes, emailBody){
+		    	request.get({url: profileUrl, headers: profileHeaders, json: true}, function (error, apiRes, userBody){
+		    		if (error) {
+						console.log("error");
+				        console.log(error)
+				        callback({status: "fail", message: "Github error", errorType: "username"})
+				    } else {
+			    		console.log("here's the user:");
+			    		console.log(userBody);
+			    		// callback({status: "success", message: "Account created. Go ahead and log in!"});
 
-				    		if(emailBody.message != "Not Found"){
+			    		/* from here on, we try to log the user in */
 
-				    			console.log("email body:");
-					    		console.log(emailBody);
+			    		if(typeof(userBody.id) != "undefined" && userBody.message != 'Bad credentials'){ 
 
-					    		var thisEmail = emailBody[0]["email"];
+					    	request.get({url: emailUrl, headers: profileHeaders, json: true}, function (error, apiRes, emailBody){
 
-					    		var userQuery = {
-						            email: thisEmail
-						        }	
+					    		if(emailBody.message != "Not Found"){
 
-						        var userid = userBody.id;
+					    			console.log("email body:");
+						    		console.log(emailBody);
 
-						        database.read(db, "users", userQuery, function checkIfUserExists(existingUsers){
-									if(existingUsers.length == 1){
+						    		var thisEmail = emailBody[0]["email"];
 
-										// if this user exists, let's try to log the user in
+						    		console.log("thisEmail: " + thisEmail);
 
-										var thisUser = existingUsers[0];
+						    		var userQuery = {
+							            email: thisEmail
+							        }	
 
-										if(typeof(thisUser.githubId) != "undefined" && thisUser.githubId != null){
-											console.log("this IS a Github user");
-											if(thisUser.githubId == userid){
-												logUserIn(thisUser, db, req, function(response){
-													callback({status: "logged in"});
-												})
-											} else {
-												req.session.user = null;
-												callback({status: "fail", message: "You are not who you appear to be", errorType: "username"})
-											}
-										} else {
-											console.log("this isn't a Github user");
-											req.session.user = null;
-											callback({status: "fail", message: "Please log in with your username and password or Google account", errorType: "username"})
-										}
-									} else if (existingUsers.length == 0) {
+							        console.log(userQuery);
+
+							        var userid = userBody.id;
+
+							        database.read(db, "users", userQuery, function checkIfUserExists(existingUsers){
 										
-										// if this user doesn't exist, let's try to create an account
+							        	console.log("existingUsers.length: " + existingUsers.length);
 
-										createNewUser(null, null, userid, thisEmail, db, req, function(newUser){
-											callback({status: "account created", message: "Account created. Go ahead and log in!", user: newUser});
-										})
-									} else {
-										callback({status: "fail", message: "Something really weird happened", errorType: "username"})
-									}
+										if(existingUsers.length == 1){
 
-								}) 
+											// if this user exists, let's try to log the user in
 
-				    		} else {
-				    			callback({status: "fail", message: "Github email error. Sorry!"})
-				    		}
+											var thisUser = existingUsers[0];
 
-					    });
-					} else {
-		    			callback({status: "fail", message: "Invalid Github credentials. Try creating a regular email account."})
+											if(typeof(thisUser.githubId) != "undefined" && thisUser.githubId != null){
+												console.log("this IS a Github user");
+												if(thisUser.githubId == userid){
+													logUserIn(thisUser, db, req, function(response){
+														callback({status: "logged in"});
+													})
+												} else {
+													req.session.user = null;
+													callback({status: "fail", message: "You are not who you appear to be", errorType: "username"})
+												}
+											} else {
+												console.log("this isn't a Github user");
+												req.session.user = null;
+												callback({status: "fail", message: "Please log in with your username and password or Google account", errorType: "username"})
+											}
+										} else if (existingUsers.length == 0) {
+											
+											// if this user doesn't exist, let's try to create an account
+
+											createNewUser(null, null, userid, thisEmail, db, req, function(newUser){
+												callback({status: "account created", message: "Account created. Go ahead and log in!", user: newUser});
+											})
+										} else {
+											callback({status: "fail", message: "Something really weird happened", errorType: "username"})
+										}
+
+									}) 
+
+					    		} else {
+					    			callback({status: "fail", message: "Github email error. Sorry!"})
+					    		}
+
+						    });
+						} else {
+			    			callback({status: "fail", message: "Invalid Github credentials. Try creating or logging in with a regular email account."})
+			    		}
 		    		}
-	    		}
-	    	});
+		    	});
+		    } else {
+		    	callback({status: "fail", message: "Bummer - invalid access token. Refresh and try again."});
+		    }
 	    }
 	});
 
@@ -1589,6 +1672,8 @@ function createNewUser(hash, thisGoogleId, thisGithubId, thisEmail, db, req, cal
 }
 
 
+/* TERM FUNCTIONS */
+
 function getTopTerms(db, req, callback){
 
 //	 var requestQuery = { termExists: false } 
@@ -1600,14 +1685,8 @@ function getTopTerms(db, req, callback){
 	database.sortRead(db, "terms", {}, orderQuery, function getSearches(allSearches){
 		var topSearches = allSearches.splice(0, 10);
 
-		console.log("topSearches");
-		console.log(topSearches);
-
 		database.sortRead(db, "requests", requestQuery, weightQuery, function getSearches(allRequests){
 			var topRequests = allRequests.splice(0, 10);
-
-			console.log("topRequests");
-			console.log(topRequests);
 
 
 			var response = {
@@ -1617,6 +1696,35 @@ function getTopTerms(db, req, callback){
 
 			callback(response);
 		})
+	})
+}
+
+function getAllTerms(db, req, callback){	
+
+	console.log("getting all terms");
+	var sortQuery = {name: 1}
+
+	database.sortRead(db, "terms", {}, sortQuery, function getTerms(result){
+        callback({terms: result});
+    });
+}
+
+
+function getEmptyTerms(db, req, callback){
+
+	var definitionQuery = {
+		removed: false,
+		rejected: false,
+		approved: true
+	}
+
+	database.read(db, "definitions", definitionQuery, function fetchAllDefinitions(definitions){
+		console.log("Got " + definitions.length + " definitions");
+
+		for(var i = 0; i < definitions.length; i++){
+			var definition = definitions[i];
+			createTermFromDefinition(db, req, i, definition);
+		}
 	})
 }
 
@@ -2166,7 +2274,7 @@ function passwordResetRequest(db, req, callback){
 				database.create(db, "passwordResets", passwordResetRequest, function confirmRequest(request){
 
  
-					var emailBody = "<p>Hey " +  users[0].username + "!<br><br>Here is the password reset link you requested: <br><br>www.hackterms.com/password-reset/" + passwordResetRequest.id + "<br><br>If you did not request this password request, please ignore this email.<br><br>Thanks!<br>-Max from Hackterm";
+					var emailBody = "<p>Hey " +  users[0].username + "!<br><br>Here is the password reset link you requested: <br><br>www.hackterms.com/password-reset/" + passwordResetRequest.id + "<br><br>If you did not request this password request, please ignore this email.<br><br>Thanks!<br>-Max from Hackterms";
 
 
 					var mailOptions = {
@@ -2347,36 +2455,6 @@ function getFAQ(db, req, callback){
 	})
 }
 
-function getAllTerms(db, req, callback){	
-
-	console.log("getting all terms");
-	var sortQuery = {name: 1}
-
-	database.sortRead(db, "terms", {}, sortQuery, function getTerms(result){
-        callback({terms: result});
-    });
-}
-
-
-function getEmptyTerms(db, req, callback){
-
-	var definitionQuery = {
-		removed: false,
-		rejected: false,
-		approved: true
-	}
-
-	database.read(db, "definitions", definitionQuery, function fetchAllDefinitions(definitions){
-		console.log("Got " + definitions.length + " definitions");
-
-		for(var i = 0; i < definitions.length; i++){
-			var definition = definitions[i];
-			createTermFromDefinition(db, req, i, definition);
-		}
-	})
-}
-
-
 
 function fillInTerms(db, req, callback){
 
@@ -2532,6 +2610,41 @@ function sendRequestDefinitionEmail(db, email, i){
 	}, 50*i);
 }
 
+
+function createNotification(db, req, user, message, thisTerm, thisStatus, thisType, callback){
+	var newNotification = {
+		to: user,
+		from: "admin",
+		date: new Date(),
+		body: message,
+		type: thisType,
+		term: thisTerm,
+		status: thisStatus
+	}
+
+	var newNotificationsUpdate = {
+		$set: {
+			"data.newNotifications": true
+		}
+	}
+
+	var userQuery = {
+		username: user
+	}
+
+	
+	database.create(db, "notifications", newNotification, function createNotification(newNotification){
+		database.update(db, "users", userQuery, newNotificationsUpdate, function addNewNotification(updatedUser){
+
+			console.log("newNotification");
+			console.log(newNotification[0]);
+
+
+			console.log("Notification created for " + user);
+			callback();
+		});
+	})
+}
 
 
 

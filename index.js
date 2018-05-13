@@ -69,9 +69,9 @@ MongoClient.connect(dbAddress, function(err, db){
         var timeNow = new Date();
         console.log("-----> " + req.method.toUpperCase() + " " + req.url + " on " + timeNow); 
 
-        dbops.logVisit(db, req, function(){
+/*        dbops.logVisit(db, req, function(){
             // console.log("visit logged");            
-        }) 
+        }) */
 
         next();
     });
@@ -139,28 +139,29 @@ MongoClient.connect(dbAddress, function(err, db){
 /* ROUTES */
 
     app.get("/", function(req, res){
+        console.log("getting /");
         res.render("index", {searchTerm: ""});
     });
 
-    app.get("/faq", function(req, res){
+    app.get("/about/faq", function(req, res){
         res.render("faq");
     });
 
-    app.get("/darules", function(req, res){
+    app.get("/about/darules", function(req, res){
         res.render("rules");
     });
 
-    app.get("/all", function(req, res){
+    app.get("/about/all", function(req, res){
         dbops.getAllTerms(db, req, function renderTerms(allTerms){
             res.render("all", {terms: allTerms.terms});
         })
     });
 
-    app.get("/changelog", function(req, res){
+    app.get("/about/changelog", function(req, res){
         res.render("changelog");
     });
 
-    app.get("/press", function(req, res){
+    app.get("/about/press", function(req, res){
         res.render("press");
     });
 
@@ -181,10 +182,19 @@ MongoClient.connect(dbAddress, function(err, db){
             termNames.sort(function(a,b){return b.length - a.length})
             console.log(termNames);
 
-            res.send({status: "success", terms: termNames});
-        })
+            var loginStatus = false;
+            var moderatorStatus = false;
 
+            if(req.session.user){ loginStatus = true }      
 
+            if(req.session.user){
+                if(req.session.user.admin == "true" || req.session.user.moderator == "true" || req.session.user.admin == true || req.session.user.moderator == true){
+                    moderatorStatus = true;
+                }
+            }
+
+            res.send({status: "success", terms: termNames, isLoggedIn: loginStatus, isModerator: moderatorStatus});
+        });
     })
     
     
@@ -213,6 +223,32 @@ MongoClient.connect(dbAddress, function(err, db){
         }
         
     });
+/*
+    app.get("/about/status", function(req, res){
+
+        if(req.session.user && req.session.user.username == "max"){
+            dbops.getMetrics(db, req, function retrieveData(response){
+
+                res.render("metrics", {
+                    visitCount: response.visitCount,
+                    userCount: response.userCount, 
+                    users: response.users,
+                    approvedDefinitions: response.approvedDefinitions,
+                    unapprovedDefinitions: response.unapprovedDefinitions,
+                    approvedDefinitionCount: response.approvedDefinitions.length,
+                    unapprovedDefinitionCount: response.unapprovedDefinitions.length,
+                    termCount: response.termCount,
+                    searchCount:[],
+                    newDefinitionCount: []
+                });
+
+            });
+
+        } else {
+            res.redirect("/");
+        }
+        
+    });*/
 
     app.post("/analytics", function(req, res){
         if(req.session.user && req.session.user.username == "max"){
@@ -474,7 +510,7 @@ MongoClient.connect(dbAddress, function(err, db){
     });
 
     app.post("/login", function(req, res){
-        dbops.login(db, req, function vote(response){
+        dbops.login(db, req, function login(response){
 
             if(response.status == "fail"){
                 res.send({
@@ -483,6 +519,7 @@ MongoClient.connect(dbAddress, function(err, db){
                     errorType: response.errorType
                 });
             } else {
+                //res.render("index")
                 res.send({ status: "success" });
             }
         });
@@ -509,7 +546,7 @@ MongoClient.connect(dbAddress, function(err, db){
 
     app.get("/github-oauth", function(req, res){
 
-        if(req.session.loggedIn){
+        if(req.session && req.session.user && req.session.loggedIn){
             console.log("Already logged in");
             res.send({status: "logged in" });
         } else {
@@ -525,7 +562,11 @@ MongoClient.connect(dbAddress, function(err, db){
                 console.log(response);
 
                 if(response.status == "fail"){
-                    res.render("index", { searchTerm: "", error: response.message});
+                    console.log("failing - rendering index");
+                    req.session.error = response.message;
+                    res.render("index", { searchTerm: "", message: "Account created. Log in with Github!"});
+                    // res.redirect("/");
+
                 } else {
                     if(response.status == "account created"){
                         res.render("index", { searchTerm: "", message: "Account created. Log in with Github!"});

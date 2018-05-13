@@ -76,7 +76,7 @@
     <div id = "definition-metrics-section">
 
         <% approvedDefinitions.forEach(function(def){ %>
-            <div class = "metric-definition"><a class = "bold" href ="<%= def.term %>"><%= def.term %></a> </div>
+            <div class = "metric-definition"><a class = "bold" href ="<%= def.term.replace("/", "%2F") %>"><%= def.term %></a> </div>
             <div class = "metric-search-author"><a href ="profile/<%= def.author %>"><%= def.author %></a></div>
             <div class = "metric-definition-author"><%= def.created.toString().substring(0,21) %></div>
             <br>

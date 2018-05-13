@@ -8,7 +8,7 @@ function create(db, col, obj, callback){
             console.log(err);
         }
         console.log("Successfully saved this object to '" + col + "' :");
-        console.log(obj);
+        //console.log(obj);
         callback(result);
     })
 }
@@ -79,7 +79,6 @@ function sortRead(db, col, obj, sort, callback){
             console.log(err);
         }
         console.log("READ AND SORT: pulled " + result.length + " records from '" + col + "' for the query WITH SORT:");
-        console.log(obj);
         console.log(sort);
         callback(result);
     })

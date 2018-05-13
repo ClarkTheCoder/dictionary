@@ -13,58 +13,9 @@ var triggerEvent = "click";
 
 var singleTermDefinition = false;
 
-
-
-function init(){
-    gapi.load("auth2", function(){
-            gapi.auth2.init();
-        })
-}
-/**/
-
-
-function onSignIn(googleUser) {     // this'll only run if a user is signed in
-                                    // googleUser IS THE SAME THING AS  gapi.auth2.getAuthInstance().currentUser.get();
-
-    var id_token = googleUser.getAuthResponse().id_token;
-    var profile = googleUser.getBasicProfile();
-
-    console.log("a user is signed in");
-
-    var loginToken = {
-        idtoken: id_token
-    }
-
-    if($("#new-username").length == 0 && gapi.auth2.getAuthInstance().isSignedIn.get()){
-
-        $.ajax({
-            type: "post",
-            data: loginToken,
-            url: "/google-login",
-            success: function(result){
-
-                if(result.status == "fail"){
-                    console.log("failing");
-                     gapi.auth2.getAuthInstance().signOut();
-                    $("." + result.errorType + "-error").text(result.message).css("display", "block");
-                } else if(result.status == "logged in"){
-                    console.log("already logged in");
-                } else {
-                    window.location.href = "/";
-                }
-            }
-        });
-
-    }
-}
-
-
-$("body").on(triggerEvent, "#google-sign-out", function(){
-    gapi.auth2.getAuthInstance().signOut().then(function () {
-        console.log('User signed out.');
-    });
-})
-
+var allTerms = [];
+var loggedIn = false;           // will need to replace this with a copy of the user's session data
+var moderator = false; 
 
 function main(){
 
@@ -108,7 +59,7 @@ function main(){
         }
     }
 
-    resetNavBar();
+    $("#signup-modal, #login-modal").hide();
     populateRandomSearchTerm();
 
 
@@ -128,9 +79,27 @@ function main(){
             var searchBarFontSize = (2.5 - (textLength - 18)*0.095);
             if(searchBarFontSize < 1.3) { searchBarFontSize = 1.3 };
             $("#search-bar").css("font-size", searchBarFontSize + "em");
+           // $(".search-add-button").css("width", "calc(" +  searchBarFontSize + "em + 19px)").css("height", "calc(" +  searchBarFontSize + "em + 19px)");
         }
 
         pageSearch();
+
+        $.ajax({
+            type: "get",
+            url: "/all-terms",
+            success: function(result){
+                if(result.status == "success"){
+                    allTerms = result.terms;
+                    loggedIn = result.isLoggedIn;
+                    moderator = result.isModerator;
+                    console.log("Fetched " + result.terms.length + " terms");
+                } else {
+                    console.log("ERROR!");
+                    console.log(result.error);
+                    flash("error", result.error);
+                }
+            }
+        })
 
     }
 
@@ -237,6 +206,10 @@ function main(){
         $(".comments-section[data-id=" + this.dataset.id + "]").toggle();
         $(".fa-comment[data-id=" + this.dataset.id + "]").toggle();
 
+        if($(".fa-chevron-circle-down[data-id=" + this.dataset.id + "]").is(":visible")){
+            $(".fa-chevron-circle-down[data-id=" + this.dataset.id + "]").css("display","inline");
+        }
+
     });
 
     $("body").on(triggerEvent, ".delete-post", function(){
@@ -268,6 +241,8 @@ function main(){
             $("#definition-category-selection").val(post.category);
             $("#related-term-textarea").val(relatedTerms);
             $("#add-definition")[0].dataset.id = post.id;
+
+            $("#add-definition").text("Save");
 
             var charCount = $("#new-definition-textarea").val().length;
 
@@ -306,7 +281,6 @@ function main(){
 
     
 /* LISTENERS */
-
 
 	$("body").on("keydown", function(e){        
 
@@ -399,7 +373,7 @@ function main(){
             singleTermDefinition = false;
             $("#terms-section").empty();
         }
-
+/* HIDE THIS */
         if($("#search-bar").val().length > 0){
             $(".top-terms").hide();
         } else {
@@ -409,6 +383,9 @@ function main(){
             $(".top-terms").show();
         }
 
+/* --- */
+
+
         if(e.which == 8){                                         // 8 = backspace
             singleTermDefinition = false;
             document.title = "Hackterms: " + thisSearch.toLowerCase();
@@ -417,6 +394,8 @@ function main(){
             $("#definitions-section").empty();
         }
     });
+
+/* HIDE THIS */
 
     $("body").on("keyup", "#related-term-textarea", function(e){
         if($("#related-term-textarea").val().length > 1){
@@ -433,6 +412,8 @@ function main(){
             $("#related-term-suggestions-section").empty();
         }
     });
+
+/* --- */
 
 
 	$("body").on("keyup", "#new-definition-textarea", function(){
@@ -469,8 +450,10 @@ function main(){
     
     })
 
-    $("body").on(triggerEvent, "#new-def-link", function(){
+    $("body").on(triggerEvent, ".new-def-link", function(){
         window.scrollTo(0, 0);
+
+        $("#add-definition").text("Add");
 
         // show new definition modal and empty text fields
         $("#new-definition").show();
@@ -490,7 +473,7 @@ function main(){
         $("#terms-section").empty();
     });
 
-    $("body").on(triggerEvent, "#request-def-link", function(event){
+    $("body").on(triggerEvent, ".request-def-link", function(event){
 
         event.stopPropagation();
         event.preventDefault();
@@ -518,6 +501,7 @@ function main(){
         $(".pop-out").find("input").val("");
         $(".pop-out").find(".report-error").text("");
         $(".new-definition-error .new-request-error").text("");
+        $("#formatting-link").text("").append("<span id ='formatting-link' class = 'link'>Formatting</span>");
         $(".pop-out").hide();
     });
 
@@ -551,7 +535,7 @@ function main(){
     });
 
     $("body").on(triggerEvent, "#account-close", function(){
-        resetNavBar();
+        $("#signup-modal, #login-modal").hide();
     });
 
     $("body").on(triggerEvent, "#login-action", function(){
@@ -597,7 +581,7 @@ function main(){
         $("#request-definition-modal").hide();  
     });
 
-    $("body").on(triggerEvent, "#login-to-request", function(){
+    $("body").on(triggerEvent, ".login-to-request", function(){
         $("#request-login-modal").show();  
         event.stopPropagation();
         event.preventDefault();
@@ -627,12 +611,8 @@ function main(){
         selectNewUsername();
     });
 
-
-
-
-
     $("body").on(triggerEvent, "#password-reset-link", function(){
-        resetNavBar();
+        $("#signup-modal, #login-modal").hide();
         $("#password-reset-email, #password-reset-action, #password-reset-modal .account-title, #password-reset-modal p").show();
         $("#reset-request-confirm").hide();
         $("#password-reset-modal").show();
@@ -646,8 +626,18 @@ function main(){
 
     });
 
+    $("body").on(triggerEvent, "#logged-in-options-toggle", function(){
+
+        if($(".hamburger-menu-options").is(":visible")){
+            $(".hamburger-menu-options").hide();
+        } else {
+            $(".hamburger-menu-options").css("display", "flex");
+        }            
+    });
+
+
     $("body").on(triggerEvent, "#password-reset-link", function(){
-        resetNavBar();
+        $("#signup-modal, #login-modal").hide();
         $("#password-reset-email, #password-reset-action, #password-reset-modal .account-title, #password-reset-modal p").show();
         $("#reset-request-confirm").hide();
         $("#password-reset-modal").show();
@@ -670,14 +660,21 @@ function main(){
         }
     });
 
-    $("body").on(triggerEvent, "#github-login", function(){
-    //    githubLogin();
+    $("body").on(triggerEvent, "#formatting-link", function(){
+        //$("#formatting-modal").show();  
+        $("#formatting-link").text("");
+        $("#formatting-link").append("<span class= 'one-format'><span class = 'bold'>** bold **</span></span>");
+        $("#formatting-link").append("<span class= 'one-format'><em>* italic *</em></span>");
+        $("#formatting-link").append("<span class= 'one-format'><code>` code `</code></span>");
+        $("#formatting-link").removeClass("link");
     });
 
 }
 
 
 function githubLogin() {
+
+    console.log("logging in with github");
 
     var data = {}
 
@@ -699,19 +696,6 @@ function githubLogin() {
 
 /* FUNCTIONS */
 
-function resetNavBar(){
-    $("#login-username, #login-password, #signup-username, #signup-password").val("");
-    $("#login-section, #signup-section").hide();
-    $("#signup-modal").hide();
-    $("#login-modal").hide();
-    $("#login, #signup").show();
-    $(".account").show();
-
-    if(screenWidth < 980){
-        $("#home-link").css("float", "left")
-    }
-
-}
 
 function populateRandomSearchTerm(){
     var sampleSearches = ["javascript", "rails", "node.js", "session", "function", "mongodb", "sublime text", "mvc"];
@@ -749,6 +733,7 @@ function showSignup(){
     }
 }
 
+
 function search(){
 
     if($("#search-bar").val() && location.pathname.indexOf("profile") == -1){
@@ -756,68 +741,55 @@ function search(){
         var searchTerm = $("#search-bar").val().trim();
         var currentText = null;
 
+        var matchingTerms = findRegexTermInArray(allTerms, searchTerm);
 
-    	var searchQuery = {
-    		term: searchTerm.toLowerCase()
-    	}
+    	
+		$("#terms-section").empty();
 
-    	$.ajax({
-            type: "post",
-            data: searchQuery,
-            url: "/search",
-            success: function(result){
+        if(matchingTerms.length == 0){                                  // IF THIS TERM DOESN'T EXIST
+            
+            console.log("NO RESULTS");
+            $("#definitions-section").empty();
+            displayDefinitionsOnPage([], loggedIn, false, moderator);
+            currentText = $("#search-bar").val().trim().toLowerCase();
+            
+            //if after 2 seconds the search bar contents have not changed, log the search
+            setTimeout(function checkIfSearchBarValueChanged(){
+                var newText = $("#search-bar").val().trim().toLowerCase();
+                var done = (currentText == newText);            // if currentText == newText, we're done
 
-            	if(result.status == "success"){
-            		$("#terms-section").empty();
+                var searchQuery = {
+                    term: newText
+                }
 
-                    if(result.count == 0){                                  // IF THIS TERM DOESN'T EXIST
-                        
-                        console.log("NO RESULTS");
-                        $("#definitions-section").empty();
-                        displayDefinitionsOnPage([], result.loggedIn, false, result.isModerator);
-                        currentText = $("#search-bar").val().trim().toLowerCase();
-                        
-                        //if after 2 seconds the search bar contents have not changed, log the search
-                        setTimeout(function checkIfSearchBarValueChanged(){
-                            var newText = $("#search-bar").val().trim().toLowerCase();
-                            var done = (currentText == newText);            // if currentText == newText, we're done
+                if(done){
+                    currentText = "";
+                    logSearch(searchQuery.term)
+                }
 
-                            var searchQuery = {
-                                term: newText
-                            }
+            }, 2000)
 
-                            if(done){
-                                currentText = "";
-                                logSearch(searchQuery.term)
-                            }
-
-                        }, 2000)
-
-                    } else if (result.count == 1){                      // if there's only one term, display the definition     
-                        
-                        if(!singleTermDefinition){                          
-                            logSearch(result.body[0].name);                           
-                            getDefinition(result.body[0].name, false);
-                            currentTerm = result.body[0].name;
-                        }
-
-                        singleTermDefinition = true;
-
-                    } else if (result.count > 1){                       // if there's more than one term, display the terms
-                        result.body.forEach(function(term){
-                            displaySearchTerm(term);
-                        });
-
-                        $("#definitions-section").empty();
-                        displayAddDefinitionButton(false, result.loggedIn);
-        
-                    }
-                        		
-            	} else {
-            		console.log(result.error);
-            	}
+        } else if (matchingTerms.length == 1){                      // if there's only one term, display the definition     
+            
+            if(!singleTermDefinition){                          
+                logSearch(matchingTerms[0]);                           
+                getDefinition(matchingTerms[0], false);
+                currentTerm = matchingTerms[0];
             }
-        })
+
+            singleTermDefinition = true;
+
+        } else if (matchingTerms.length > 1){                       // if there's more than one term, display the terms
+            matchingTerms.forEach(function(term){
+                displaySearchTerm(term);
+            });
+
+            $("#definitions-section").empty();
+            displayAddDefinitionButton(false, loggedIn);
+
+        }
+                    		
+
     } else {
     	console.log("you're not searching for anything!");
     }
@@ -876,14 +848,14 @@ function getTopTerms(){
 
             for(var i = 0; i < topTerms.topSearches.length; i++){
                 var term = topTerms.topSearches[i];
-                
                 $("#top-searches").append(" <a class = 'top-searched-term' href = '/" + term.name +  "'> " + term.name +"</div>")
+                // $("#new-top-searches").append(" <a class = 'top-searched-term' href = '/" + term.name +  "'> " + term.name +"</div>")
             }
 
             for(var i = 0; i < topTerms.topRequests.length; i++){
                 var request = topTerms.topRequests[i];
-                
                 $("#top-requests").append(" <a class = 'top-searched-term' href = '/" + request.term +  "'> " + request.term +"</div>")
+                // $("#new-top-requests").append(" <a class = 'top-searched-term' href = '/" + request.term +  "'> " + request.term +"</div>")
             }
 
             $("#top-requests").hide();
@@ -976,7 +948,7 @@ function getDefinition(query, forUser){
         	if(result.status == "success"){
 
                 if(!forUser){
-                    window.history.pushState("object or string", "Title", "/" + query.toLowerCase());      // update url
+                    window.history.pushState("object or string", "Title", "/" + cleanUrl(query.toLowerCase()));      // update url
                     document.title = "Hackterms: " + query.toLowerCase();
                     var searchTerm = $("#search-bar").val().trim();
                 }
@@ -1169,6 +1141,58 @@ function voteOnPost(voteDirection, elementId, voteTerm, voteType){
 }
 
 
+
+function init(){
+    gapi.load("auth2", function(){
+            gapi.auth2.init();
+        })
+}
+
+/**/
+
+
+function onSignIn(googleUser) {     // this'll only run if a user is signed in
+                                    // googleUser IS THE SAME THING AS  gapi.auth2.getAuthInstance().currentUser.get();
+
+    var id_token = googleUser.getAuthResponse().id_token;
+    var profile = googleUser.getBasicProfile();
+
+    console.log("a user is signed in");
+
+    var loginToken = {
+        idtoken: id_token
+    }
+
+    if($("#new-username").length == 0 && gapi.auth2.getAuthInstance().isSignedIn.get()){
+
+        $.ajax({
+            type: "post",
+            data: loginToken,
+            url: "/google-login",
+            success: function(result){
+
+                if(result.status == "fail"){
+                    console.log("failing");
+                     gapi.auth2.getAuthInstance().signOut();
+                    $("." + result.errorType + "-error").text(result.message).css("display", "block");
+                } else if(result.status == "logged in"){
+                    console.log("already logged in");
+                } else {
+                    window.location.href = "/";
+                }
+            }
+        });
+
+    }
+}
+
+
+$("body").on(triggerEvent, "#google-sign-out", function(){
+    gapi.auth2.getAuthInstance().signOut().then(function () {
+        console.log('User signed out.');
+    });
+})
+
 function login(){
 
     var loginData = {
@@ -1223,7 +1247,18 @@ function signup(){
             url: "/signup",
             success: function(result){
                 if(result.status == "success"){
-                    resetNavBar();
+                    
+/*                    if(window.location.pathname.indexOf("/profile") != -1 ){
+                        location.reload();
+                    } else if(window.location.pathname.indexOf("/password-reset") != -1){
+                        window.location.href = "http://hackterms.com";
+                    } else {            
+                        window.location.href = "/";
+                    } 
+*/
+
+
+                    $("#signup-modal, #login-modal").hide();
                     flash("message", result.message)
                 } else {
                     $(".report-error").text("");
@@ -1288,7 +1323,7 @@ function requestDefinition(){
                 $("#request-definition-form").hide();
                 $("#request-definition-confirmation").css("display", "block");
 
-                $("#request-def-link").remove();
+                $(".request-def-link").remove();
 
             } else {
                 $(".report-error").text("");
@@ -1472,6 +1507,15 @@ function displayDefinitionsOnPage(definitions, isLoggedIn, forUser, isModerator)
                 // a bit of handlebars magic
 
                 definitions.forEach(function(thisDefinition){
+
+
+                    var date = thisDefinition.lastEdit.substr(0, 10);
+                    var months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+                    var monthIndex = parseInt(thisDefinition.lastEdit.substr(5, 6)) - 1;
+                    var fullDate = months[monthIndex] + " " + parseInt(thisDefinition.lastEdit.substring(8, 10)) + ", " + thisDefinition.lastEdit.substring(0, 4);
+
+
+
                     var thisScore = thisDefinition.upvotes - thisDefinition.downvotes;
 
                     var myTemplate =  Handlebars.compile(definitionTemplate);
@@ -1484,7 +1528,7 @@ function displayDefinitionsOnPage(definitions, isLoggedIn, forUser, isModerator)
                     var context = {
                         definition: thisDefinition,
                         link: cleanUrl(thisDefinition.term),
-                        editDate: thisDefinition.lastEdit.substr(0, 10),
+                        editDate: fullDate,
                         score: thisScore,
                         id: thisDefinition.id,
                         commentCount: thisDefinition.comments.length,
@@ -1499,6 +1543,12 @@ function displayDefinitionsOnPage(definitions, isLoggedIn, forUser, isModerator)
                     // replace multiple line breaks with one
                     $("#" + thisDefinition.id).find(".definition-body").text($("#" + thisDefinition.id).find(".definition-body").text().replace(/\n\s*\n/g, '\n\n'));
 
+                    // replace text with HTML
+
+                    if(typeof(thisDefinition.markdown) != "undefined" && thisDefinition.markdown.trim().length){
+                        $("#" + thisDefinition.id).find(".definition-body").html(thisDefinition.markdown);    
+                    }
+                    
 
                     if(typeof(thisDefinition.related) != "undefined" && thisDefinition.related != null){
                         thisDefinition.related.forEach(function(relatedTerm){ 
@@ -1540,7 +1590,7 @@ function displayDefinitionsOnPage(definitions, isLoggedIn, forUser, isModerator)
 
                 displayAddDefinitionButton(forUser, isLoggedIn);
 
-                hilightLinks(mainTerm);
+                highlightLinks(mainTerm);
 
             }, 'html');
         }, 'html');
@@ -1549,7 +1599,8 @@ function displayDefinitionsOnPage(definitions, isLoggedIn, forUser, isModerator)
             var term = $("#search-bar").val();
             $("#definitions-section").append("<div class = 'definition-accent'>There are no definitions for <span class = 'bold'>" + term + "</span> yet. You should add one!</div>");
             document.title = "Hackterms: " + term.toLowerCase();
-            window.history.pushState("object or string", "Title", "/" + term.toLowerCase());
+
+            window.history.pushState("object or string", "Title", "/" + cleanUrl(term.toLowerCase()));
             displayAddDefinitionButton(forUser, isLoggedIn);
         } else {
             $("#definitions-section").append("<div class = 'definition-accent'>This user hasn't added any definitions yet</div>");
@@ -1561,15 +1612,28 @@ function displayDefinitionsOnPage(definitions, isLoggedIn, forUser, isModerator)
 
 function displayAddDefinitionButton(forUser, isLoggedIn){
 
+    
+
     if(!forUser){
+
+        $("#definitions-section").append("<div id = 'definition-section-button-wrapper'></div>");
+        $("#definition-section-button-wrapper").css("display", "flex").css("flex-direction", "row");
+
+        if(screenWidth < 980) {
+            $("#definition-section-button-wrapper").css("flex-direction", "column");
+        }
+
         if(isLoggedIn){
-            $("#definitions-section").append("<button class = 'new-def-button' id = 'new-def-link'>Add a Definition<span></div>");
-            $("#definitions-section").append("<button class = 'request-def-button' id = 'request-def-link'>Request a Definition<span></div>");
+            $("#definition-section-button-wrapper").append("<button class = 'new-def-button new-def-link'>Add a Definition<span></div>");
+            $("#definition-section-button-wrapper").append("<button class = 'request-def-button request-def-link'>Request a Definition<span></div>");
         } else {
-            $("#definitions-section").append("<button class = 'new-def-button login-link'>Add a Definition</div>");
-            $("#definitions-section").append("<button class = 'request-def-button' id = 'login-to-request'>Request a Definition<span></div>");
+            $("#definition-section-button-wrapper").append("<button class = 'new-def-button login-link'>Add a Definition</div>");
+            $("#definition-section-button-wrapper").append("<button class = 'request-def-button login-to-request'>Request a Definition<span></div>");
         } 
+
     }   
+
+
 }
 
 
@@ -1645,8 +1709,8 @@ function sortPosts(posts){
 }
 
 function displaySearchTerm(term){
-	$("#terms-section").append("<div class = 'term'><span class = 'title'><span class ='term-link'>" + term.name + "</span></span></div>");
-    $(".term-link").last().attr("id", term.name)
+	$("#terms-section").append("<div class = 'term'><span class = 'title'><span class ='term-link'>" + term + "</span></span></div>");
+    $(".term-link").last().attr("id", term)
 } 
 
 function displayDefinitionSuggestion(term){
@@ -1673,12 +1737,12 @@ function displayNotification(){
                 $("#report").hide();
                 $("#new-definition").hide();
                 $("#notifications").show();
-                $("#notifications").css("left", ($(".notification-bell")[0].offsetLeft-140) + "px");
-                $("#notifications").css("top", ($(".notification-bell")[0].offsetTop+30) + "px");
+                
+                $("#notifications").css("top", "20vh");
 
-                if(screenWidth < 980){
-                    $("#notifications").css("left", ($(".notification-bell")[0].offsetLeft-45) + "px");
-                }
+                /*$("#notifications").css("left", ($(".notification-bell")[0].offsetLeft-140) + "px");
+                $("#notifications").css("top", ($(".notification-bell")[0].offsetTop+30) + "px");*/
+
 
                 $("#notifications-section").empty();
 
@@ -1704,9 +1768,11 @@ function addNotificationsToScreen(){
         if(!(typeof(notification) == "undefined")){
 
             if(notification.type == "definition"){
-                $("#notifications-section").append("<div class = 'notification-panel one-notification'><a href = '/profile/status'>Your submission <span class ='bold'>" + notification.term + "</span> has been <span class ='submission-update post-"+ notification.status + "'>" + notification.status + "</a></span></div>");
-            } else if (notification.type = "comment"){
-                $("#notifications-section").append("<div class = 'notification-panel one-notification'>Your comment has been <span class ='submission-update post-"+notification.status + "'>" + notification.status + "</span></div>");
+                $("#notifications-section").append("<div class = 'notification-panel one-notification'><a href = '/" + notification.term + "'>Your submission <span class ='bold'>" + notification.term + "</span> has been <span class ='submission-update post-"+ notification.status + "'>" + notification.status + "</a></span></div>");
+            } else if (notification.type == "comment"){
+                $("#notifications-section").append("<div class = 'notification-panel one-notification'><a href = '/" + notification.term + "'>Your comment has been <span class ='submission-update post-"+notification.status + "'>" + notification.status + "</a></span></div>");
+            } else if (notification.type == "new-comment"){
+                $("#notifications-section").append("<div class = 'notification-panel one-notification'><a href = '/" + notification.term + "'>New comment on your definition: <span class ='submission-update post-"+ notification.status + "'>" + notification.term  + "</a></span></div>");
             }            
         }  
     }
@@ -1830,25 +1896,30 @@ function getExistingDefinition(thisId, callback){
     })
 }
 
-function hilightLinks(thisTerm){
+function highlightLinks(thisTerm){
 
-console.log("This feature is off for now");
-/*
-    if($(".definition-body").length >0){
-        $.ajax({
-            type: "get",
-            url: "/all-terms",
-            success: function(result){
-                if(result.status == "success"){
-                    insertTermLinks(result.terms, thisTerm);
-                } else {
-                    console.log("ERROR!");
-                    console.log(result.error);
-                    flash("error", result.error);
+// console.log("This feature is off for now");
+
+    if(allTerms.length > 0){
+        insertTermLinks(allTerms, thisTerm);
+    } else {
+        if($(".definition-body").length >0){
+            $.ajax({
+                type: "get",
+                url: "/all-terms",
+                success: function(result){
+                    if(result.status == "success"){
+                        insertTermLinks(result.terms, thisTerm);
+                    } else {
+                        console.log("ERROR!");
+                        console.log(result.error);
+                        flash("error", result.error);
+                    }
                 }
-            }
-        })
-    }*/
+            })
+        }
+    }
+
 }
 
 
